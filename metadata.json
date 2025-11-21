@@ -1,0 +1,5 @@
+{
+  "name": "Binance Live Ticker",
+  "description": "A minimalist, real-time cryptocurrency price tracker using Binance WebSocket API.",
+  "requestFramePermissions": []
+}
