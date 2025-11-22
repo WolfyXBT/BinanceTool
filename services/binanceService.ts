@@ -1,14 +1,6 @@
 
 import { BinanceTickerWS, TickerData, BinanceStreamMessage } from '../types';
 
-// REST API Interface for Snapshot
-interface BinanceTickerREST {
-  symbol: string;
-  lastPrice: string;
-  quoteVolume: string; // We use Quote Volume (Turnover)
-  priceChangePercent: string;
-}
-
 // Comprehensive list of known Quote Assets on Binance (Priority order for detection)
 export const KNOWN_QUOTE_ASSETS = [
   // Stablecoins
@@ -30,7 +22,6 @@ export const getQuoteAsset = (symbol: string): string | null => {
 };
 
 // Combined Stream URL to get 24h, 1h, and 4h tickers simultaneously
-// Format: base_url/stream?streams=stream1/stream2/...
 const BASE_WS_URLS = [
   'wss://stream.binance.com:9443/stream?streams=!ticker@arr/!ticker_1h@arr/!ticker_4h@arr',
   'wss://stream.binance.com/stream?streams=!ticker@arr/!ticker_1h@arr/!ticker_4h@arr',
@@ -49,7 +40,7 @@ export class BinanceService {
   constructor() {}
 
   public connect() {
-    // 1. Fetch Snapshot immediately (HTTP)
+    // 1. Fetch Snapshot
     this.fetchInitialSnapshot();
     // 2. Start WebSocket (Real-time)
     this.connectWebSocket();
@@ -57,68 +48,79 @@ export class BinanceService {
 
   private async fetchInitialSnapshot() {
     try {
-      // Run both fetches in parallel for speed
-      const [infoRes, tickerRes] = await Promise.all([
-        // Fetch Exchange Info to get the direct "TRADING" status of symbols
-        fetch('https://api.binance.com/api/v3/exchangeInfo?permissions=SPOT'),
-        // Fetch standard 24hr statistics
-        fetch('https://api.binance.com/api/v3/ticker/24hr')
-      ]);
-
-      if (!infoRes.ok || !tickerRes.ok) {
-        throw new Error('Failed to fetch API data');
+      // Attempt 1: Try fetching from our own Vercel Serverless Function
+      // This is the best path: it handles CORS, solves network blocks, and provides 1h/4h data.
+      const response = await fetch('/api/snapshot');
+      
+      if (!response.ok) {
+        // If this fails (e.g., 404 in local dev), throw to trigger fallback
+        throw new Error(`Server snapshot endpoint returned ${response.status}`);
       }
 
-      const infoData = await infoRes.json();
-      const tickerData: BinanceTickerREST[] = await tickerRes.json();
+      const data: any[] = await response.json();
 
-      // Create a Set of symbols that are explicitly in 'TRADING' status
-      const activeSymbols = new Set<string>();
-      if (infoData.symbols && Array.isArray(infoData.symbols)) {
-        infoData.symbols.forEach((s: any) => {
-          if (s.status === 'TRADING') {
-            activeSymbols.add(s.symbol);
-          }
+      // Populate the map
+      data.forEach(record => {
+        this.tickerMap.set(record.symbol, {
+          ...record,
+          // Ensure nulls from JSON become undefined for the interface
+          changePercent1h: record.changePercent1h ?? undefined,
+          changePercent4h: record.changePercent4h ?? undefined,
         });
-      }
-
-      tickerData.forEach(item => {
-        const symbol = item.symbol;
-        
-        // FILTER: Only allow symbols that are legally "TRADING" according to Exchange Info.
-        // This replaces the previous quoteVolume check with a direct status check.
-        if (!activeSymbols.has(symbol)) {
-          return;
-        }
-
-        const quoteVolume = parseFloat(item.quoteVolume);
-
-        // Note: REST API does not provide 1h/4h data, only 24h.
-        // 1h/4h columns will remain empty until WebSocket updates arrive.
-        const newRecord: TickerData = {
-          symbol: symbol,
-          price: parseFloat(item.lastPrice),
-          volume: quoteVolume, // Quote Volume
-          changePercent24h: parseFloat(item.priceChangePercent),
-        };
-
-        // We map it directly. If WS has already updated it (race condition), 
-        // we might overwrite newer data with older snapshot data, 
-        // but usually snapshot finishes before WS connects. 
-        const existing = this.tickerMap.get(symbol);
-        if (!existing) {
-           this.tickerMap.set(symbol, newRecord);
-        } else {
-           // Update standard fields
-           existing.price = newRecord.price;
-           existing.volume = newRecord.volume;
-           existing.changePercent24h = newRecord.changePercent24h;
-        }
       });
 
       this.notify();
     } catch (error) {
-      console.error("Failed to fetch initial snapshot:", error);
+      console.warn("Internal API snapshot failed (expected in local dev), falling back to public Binance API.", error);
+      // Attempt 2: Fallback to Direct Client-Side Fetching
+      await this.fallbackClientSideSnapshot();
+    }
+  }
+
+  private async fallbackClientSideSnapshot() {
+    try {
+      // 1. Get Exchange Info to filter for TRADING status only
+      // Note: Using a public proxy or direct if allowed. Direct usually works if no CORS issues, 
+      // otherwise the user might need a VPN or this might fail too (in which case WS is the last resort).
+      const infoResponse = await fetch('https://api.binance.com/api/v3/exchangeInfo?permissions=SPOT');
+      if (!infoResponse.ok) throw new Error('Binance Info failed');
+      const infoData = await infoResponse.json();
+      
+      const tradingSymbols = new Set<string>();
+      if (infoData.symbols && Array.isArray(infoData.symbols)) {
+        infoData.symbols.forEach((s: any) => {
+          if (s.status === 'TRADING') {
+            tradingSymbols.add(s.symbol);
+          }
+        });
+      }
+
+      // 2. Get 24h Ticker for all pairs
+      const tickerResponse = await fetch('https://api.binance.com/api/v3/ticker/24hr');
+      if (!tickerResponse.ok) throw new Error('Binance Ticker failed');
+      const tickerData = await tickerResponse.json();
+
+      // 3. Map and Filter
+      tickerData.forEach((item: any) => {
+        if (!tradingSymbols.has(item.symbol)) return;
+        
+        // Note: Client-side fallback cannot efficiently get 1h/4h for all pairs due to API limits.
+        // Those columns will remain empty until WebSocket updates arrive.
+        this.tickerMap.set(item.symbol, {
+          symbol: item.symbol,
+          price: parseFloat(item.lastPrice),
+          volume: parseFloat(item.quoteVolume),
+          changePercent24h: parseFloat(item.priceChangePercent),
+          changePercent1h: undefined,
+          changePercent4h: undefined,
+        });
+      });
+      
+      this.notify();
+    } catch (e) {
+      console.error("Critical: All snapshot methods failed. Waiting for WebSocket.", e);
+      // Notify empty to at least stop the loading spinner if the app logic permits
+      this.notify(); 
     }
   }
 

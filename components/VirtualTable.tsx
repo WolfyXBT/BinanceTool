@@ -131,12 +131,20 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
     return <span className="ml-1 text-gray-700">{sortDirection === 'asc' ? '↑' : '↓'}</span>;
   };
 
-  // Helper for conditional coloring
-  const getPctColor = (pct: number | undefined) => {
-    if (pct === undefined) return 'text-gray-400';
-    if (pct > 0) return 'text-green-600';
-    if (pct < 0) return 'text-red-600';
-    return 'text-gray-500';
+  // Helper for full-cell background coloring based on specific thresholds
+  const getCellBackgroundColor = (pct: number | undefined) => {
+    if (pct === undefined) return '#ffffff';
+    
+    if (pct > 30) return '#7bbc81';        // > 30%
+    if (pct > 20) return '#a3d1aa';        // 20% ~ 30%
+    if (pct > 10) return '#b1d9b9';        // 10% ~ 20%
+    if (pct > 5) return '#c0e0c7';         // 5% ~ 10%
+    if (pct > 0.01) return '#dfeee2';      // 0.01% ~ 5%
+    if (pct >= -0.01) return '#ffffff';    // -0.01% ~ 0.01% (Neutral)
+    if (pct > -5) return '#efbdc2';        // -5% ~ -0.01%
+    if (pct > -10) return '#e8939a';       // -10% ~ -5%
+    if (pct > -20) return '#e68085';       // -20% ~ -10%
+    return '#e46c72';                      // < -20%
   };
 
   return (
@@ -227,7 +235,7 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
                 style={{ height: ROW_HEIGHT, transform: `translateY(${top}px)` }}
               >
                 {/* Fav Star Button */}
-                <div className="w-10 flex items-center justify-center">
+                <div className="w-10 flex items-center justify-center bg-white h-full">
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
@@ -248,7 +256,7 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
                 </div>
 
                 {/* Token */}
-                <div className="flex-1 px-4 flex items-center min-w-0">
+                <div className="flex-1 px-4 flex items-center min-w-0 bg-white h-full">
                   <a 
                     href={tradeUrl}
                     target="_blank" 
@@ -275,27 +283,36 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
                 </div>
 
                 {/* Price */}
-                <div className="w-52 px-4 text-right font-mono text-gray-700">
+                <div className="w-52 px-4 text-right font-mono text-gray-700 bg-white h-full flex items-center justify-end">
                   {formatPrice(item.price)}
                 </div>
 
                 {/* Volume */}
-                <div className="w-52 px-4 text-right font-mono text-gray-700">
+                <div className="w-52 px-4 text-right font-mono text-gray-700 bg-white h-full flex items-center justify-end">
                   {formatVolume(item.volume)}
                 </div>
 
                 {/* 1h Change */}
-                <div className={`w-24 px-2 text-right font-mono ${getPctColor(item.changePercent1h)}`}>
+                <div 
+                  className="w-24 px-2 h-full flex items-center justify-end font-mono text-gray-700"
+                  style={{ backgroundColor: getCellBackgroundColor(item.changePercent1h) }}
+                >
                   {formatPercent(item.changePercent1h)}
                 </div>
 
                 {/* 4h Change */}
-                <div className={`w-24 px-2 text-right font-mono ${getPctColor(item.changePercent4h)}`}>
+                <div 
+                  className="w-24 px-2 h-full flex items-center justify-end font-mono text-gray-700"
+                  style={{ backgroundColor: getCellBackgroundColor(item.changePercent4h) }}
+                >
                   {formatPercent(item.changePercent4h)}
                 </div>
 
                 {/* 24h Change */}
-                <div className={`w-24 px-4 text-right font-mono ${getPctColor(item.changePercent24h)}`}>
+                <div 
+                  className="w-24 px-4 h-full flex items-center justify-end font-mono text-gray-700"
+                  style={{ backgroundColor: getCellBackgroundColor(item.changePercent24h) }}
+                >
                   {formatPercent(item.changePercent24h)}
                 </div>
               </div>

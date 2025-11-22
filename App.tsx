@@ -45,6 +45,12 @@ const App = () => {
       }
     });
 
+    // Timeout fallback: If data hasn't loaded in 10 seconds, stop loading.
+    // This handles cases where API fetch fails entirely due to network blocks.
+    const timeoutId = setTimeout(() => {
+      setIsLoading(false);
+    }, 10000);
+
     // Click outside handler for filter menu
     const handleClickOutside = (event: MouseEvent) => {
       if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
@@ -54,6 +60,7 @@ const App = () => {
     document.addEventListener('mousedown', handleClickOutside);
 
     return () => {
+      clearTimeout(timeoutId);
       unsubscribe();
       binanceService.disconnect();
       document.removeEventListener('mousedown', handleClickOutside);
@@ -364,7 +371,9 @@ const App = () => {
                  ) : (
                    <>
                      <p className="text-lg font-medium text-gray-500">No markets found</p>
-                     <p className="text-sm mt-1">Try adjusting your search or filters.</p>
+                     <p className="text-sm mt-1">
+                       {tickerDataMap.size === 0 ? "Check your network connection." : "Try adjusting your search or filters."}
+                     </p>
                    </>
                  )}
                </div>
