@@ -50,17 +50,28 @@ export class BinanceService {
   }
 
   private async fetchInitialSnapshot() {
+    console.log("[Client] Starting Initial Snapshot fetch...");
     try {
       // Attempt 1: Try fetching from our own Vercel Serverless Function
-      // This is the best path: it handles CORS, solves network blocks, and provides 1h/4h data.
       const response = await fetch('/api/snapshot');
       
+      console.log(`[Client] Server Snapshot Response: ${response.status} ${response.statusText}`);
+      
+      // Check for custom debug headers
+      const debugStatus = response.headers.get('X-Debug-Status');
+      const debugErrors = response.headers.get('X-Debug-Errors');
+      if (debugStatus) {
+        console.log(`[Client] Server Debug: Status=${debugStatus}, Errors=${debugErrors}`);
+      }
+
       if (!response.ok) {
-        // If this fails (e.g., 404 in local dev), throw to trigger fallback
+        const errorJson = await response.json();
+        console.error("[Client] Server returned error JSON:", errorJson);
         throw new Error(`Server snapshot endpoint returned ${response.status}`);
       }
 
       const data: any[] = await response.json();
+      console.log(`[Client] Successfully loaded ${data.length} records from Server.`);
 
       // Populate the map
       data.forEach(record => {
@@ -74,7 +85,8 @@ export class BinanceService {
 
       this.notify();
     } catch (error) {
-      console.warn("Internal API snapshot failed (expected in local dev), falling back to public Binance API.", error);
+      console.warn("[Client] Internal API snapshot failed. Reason:", error);
+      console.warn("[Client] Triggering Fallback to Direct Public API (24h only)...");
       // Attempt 2: Fallback to Direct Client-Side Fetching
       await this.fallbackClientSideSnapshot();
     }
@@ -83,8 +95,6 @@ export class BinanceService {
   private async fallbackClientSideSnapshot() {
     try {
       // 1. Get Exchange Info to filter for TRADING status only
-      // Note: Using a public proxy or direct if allowed. Direct usually works if no CORS issues, 
-      // otherwise the user might need a VPN or this might fail too (in which case WS is the last resort).
       const infoResponse = await fetch('https://api.binance.com/api/v3/exchangeInfo?permissions=SPOT');
       if (!infoResponse.ok) throw new Error('Binance Info failed');
       const infoData = await infoResponse.json();
@@ -104,11 +114,10 @@ export class BinanceService {
       const tickerData = await tickerResponse.json();
 
       // 3. Map and Filter
+      let count = 0;
       tickerData.forEach((item: any) => {
         if (!tradingSymbols.has(item.symbol)) return;
         
-        // Note: Client-side fallback cannot efficiently get 1h/4h for all pairs due to API limits.
-        // Those columns will remain empty until WebSocket updates arrive.
         this.tickerMap.set(item.symbol, {
           symbol: item.symbol,
           price: parseFloat(item.lastPrice),
@@ -117,12 +126,13 @@ export class BinanceService {
           changePercent1h: undefined,
           changePercent4h: undefined,
         });
+        count++;
       });
       
+      console.log(`[Client] Fallback loaded ${count} records (24h only).`);
       this.notify();
     } catch (e) {
-      console.error("Critical: All snapshot methods failed. Waiting for WebSocket.", e);
-      // Notify empty to at least stop the loading spinner if the app logic permits
+      console.error("[Client] Critical: All snapshot methods failed.", e);
       this.notify(); 
     }
   }
@@ -138,7 +148,7 @@ export class BinanceService {
     }
 
     const url = BASE_WS_URLS[this.endpointIndex];
-    console.log(`Attempting connection to: ${url}`);
+    console.log(`[Client] WebSocket Connecting to: ${url}`);
 
     try {
       this.ws = new WebSocket(url);
@@ -149,7 +159,7 @@ export class BinanceService {
     }
 
     this.ws.onopen = () => {
-      console.log(`Binance WebSocket Connected to ${url}`);
+      console.log(`[Client] WebSocket Connected`);
       this.reconnectAttempt = 0;
     };
 
@@ -162,16 +172,14 @@ export class BinanceService {
 
         const rawData = Array.isArray(message.data) ? message.data : [message.data];
         
-        // Determine which timeframe this update belongs to based on stream name
         const streamName = message.stream;
         const is1h = streamName.includes('1h');
         const is4h = streamName.includes('4h');
-        const is24h = !is1h && !is4h; // Default ticker is 24h
+        const is24h = !is1h && !is4h; 
 
         rawData.forEach((item) => {
           const symbol = item.s;
           
-          // Get existing record or create new one
           const existing = this.tickerMap.get(symbol) || {
             symbol: item.s,
             price: 0,
@@ -179,16 +187,15 @@ export class BinanceService {
             changePercent24h: 0,
           };
 
-          // Update fields based on which stream provided the data
           if (is24h) {
              existing.price = parseFloat(item.c);
-             existing.volume = parseFloat(item.q); // Quote Volume
+             existing.volume = parseFloat(item.q); 
              existing.changePercent24h = parseFloat(item.P);
           } else if (is1h) {
-             existing.price = parseFloat(item.c); // Always update price to be latest
+             existing.price = parseFloat(item.c);
              existing.changePercent1h = parseFloat(item.P);
           } else if (is4h) {
-             existing.price = parseFloat(item.c); // Always update price to be latest
+             existing.price = parseFloat(item.c); 
              existing.changePercent4h = parseFloat(item.P);
           }
 
@@ -202,14 +209,13 @@ export class BinanceService {
     };
 
     this.ws.onclose = (event) => {
-      console.log(`Binance WebSocket Closed (Code: ${event.code}). Reconnecting...`);
+      console.log(`[Client] WebSocket Closed (Code: ${event.code}).`);
       this.ws = null;
       this.scheduleReconnect();
     };
 
     this.ws.onerror = (event) => {
-      // Don't log full event object as it typically contains no useful info in browser
-      console.log('Binance WebSocket Error occurred. Connection might be blocked.');
+      console.log('[Client] WebSocket Error.');
       if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
         this.ws.close();
       }
@@ -238,7 +244,7 @@ export class BinanceService {
     
     if (this.reconnectTimeoutId) clearTimeout(this.reconnectTimeoutId);
     
-    console.log(`Reconnecting in ${delay}ms to ${BASE_WS_URLS[this.endpointIndex]}`);
+    console.log(`[Client] Reconnecting in ${delay}ms to ${BASE_WS_URLS[this.endpointIndex]}`);
     this.reconnectTimeoutId = setTimeout(() => {
       this.connectWebSocket();
     }, delay);
