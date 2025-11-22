@@ -77,9 +77,11 @@ export class BinanceService {
       data.forEach(record => {
         this.tickerMap.set(record.symbol, {
           ...record,
-          // Ensure nulls from JSON become undefined for the interface
-          changePercent1h: record.changePercent1h ?? undefined,
-          changePercent4h: record.changePercent4h ?? undefined,
+          // Ensure we explicitly treat server snapshot percentages as potentially undefined
+          // Even if the server sends null, we map it to undefined for consistency
+          changePercent1h: undefined, // Force undefined, wait for WS
+          changePercent4h: undefined, // Force undefined, wait for WS
+          changePercent24h: record.changePercent24h, // Keep 24h as it comes from the reliable 24hr ticker
         });
       });
 

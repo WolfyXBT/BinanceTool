@@ -91,12 +91,14 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
           valB = b.volume;
           break;
         case 'change1h':
-          valA = a.changePercent1h ?? -9999;
-          valB = b.changePercent1h ?? -9999;
+          // Treat undefined as 0 for sorting purposes only (keeps them in the middle)
+          valA = a.changePercent1h ?? 0;
+          valB = b.changePercent1h ?? 0;
           break;
         case 'change4h':
-          valA = a.changePercent4h ?? -9999;
-          valB = b.changePercent4h ?? -9999;
+          // Treat undefined as 0 for sorting purposes only (keeps them in the middle)
+          valA = a.changePercent4h ?? 0;
+          valB = b.changePercent4h ?? 0;
           break;
         case 'change24h':
           valA = a.changePercent24h;
