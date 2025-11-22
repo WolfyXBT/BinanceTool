@@ -11,12 +11,29 @@ const App = () => {
   // Default to USDT instead of ALL
   const [selectedAssets, setSelectedAssets] = useState<string[]>(['USDT']);
   
+  // Favorites State
+  const [favorites, setFavorites] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('binance_favorites');
+      if (saved) {
+        try {
+          return new Set(JSON.parse(saved));
+        } catch (error) {
+          console.error("Error parsing favorites from localStorage:", error);
+          return new Set();
+        }
+      }
+    }
+    return new Set();
+  });
+  const [viewMode, setViewMode] = useState<'market' | 'favorites'>('market');
+
   // Filter Menu State
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Start connection (Starts WS only)
+    // Start connection (Fetches Snapshot + Starts WS)
     binanceService.connect();
     
     // Subscribe to updates
@@ -42,6 +59,20 @@ const App = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // Persist favorites to localStorage
+  const toggleFavorite = (symbol: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(symbol)) {
+        next.delete(symbol);
+      } else {
+        next.add(symbol);
+      }
+      localStorage.setItem('binance_favorites', JSON.stringify(Array.from(next)));
+      return next;
+    });
+  };
 
   // Dynamically compute available quote assets present in the current dataset
   const { availableQuoteAssets, assetCounts } = useMemo(() => {
@@ -81,11 +112,19 @@ const App = () => {
     };
   }, [tickerDataMap]);
 
-  // Filter Data based on Quote Asset AND Search Query
+  // Filter Data based on Quote Asset, Search Query AND View Mode
   const filteredData = useMemo(() => {
     let data = Array.from(tickerDataMap.values());
 
-    // 1. Filter by Quote Asset (Base Currency)
+    // 0. Filter by View Mode (Favorites)
+    if (viewMode === 'favorites') {
+      data = data.filter(item => favorites.has(item.symbol));
+    }
+
+    // 1. Filter by Quote Asset (Base Currency) - Only apply if NOT in favorites mode, or if user wants to filter favorites
+    // Usually favorites view shows everything, but let's allow filtering favorites too if desired.
+    // However, typical behavior is "Favorites" shows all favorites regardless of quote asset filter unless specified.
+    // Let's keep quote asset filter active even in favorites for power users, but "ALL" is usually preferred there.
     if (!selectedAssets.includes('ALL')) {
       data = data.filter(item => {
         return selectedAssets.some(asset => item.symbol.endsWith(asset));
@@ -106,7 +145,7 @@ const App = () => {
     }
 
     return data;
-  }, [tickerDataMap, selectedAssets, searchQuery]);
+  }, [tickerDataMap, selectedAssets, searchQuery, viewMode, favorites]);
 
   // Statistics (Locked to 24h for general market sentiment)
   const stats = useMemo(() => {
@@ -154,10 +193,6 @@ const App = () => {
       <header className="w-full bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-             {/* Binance Logo */}
-             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-[#F0B90B]">
-                <path d="M16.624 13.9202l2.7175 2.7154-7.353 7.353-7.353-7.352 2.7175-2.7164 4.6355 4.6595 4.6356-4.6595zm4.6366-4.6366L24 12l-2.7154 2.7164L18.5682 12l2.6924-2.7164zm-9.272.001l2.7163 2.6914-2.7164 2.7174v-.001L9.2721 12l2.7164-2.7154zm-9.2722-.001L5.4088 12l-2.6914 2.6924L0 12l2.7164-2.7164zM11.9885.0115l7.353 7.329-2.7174 2.7154-4.6356-4.6356-4.6355 4.6595-2.7174-2.7154 7.353-7.353z"/>
-             </svg>
              <h1 className="text-xl font-bold tracking-tight text-gray-700">Binance Spot Market</h1>
           </div>
           
@@ -165,7 +200,7 @@ const App = () => {
              <div className="flex items-center space-x-1">
                 <span className={`w-2 h-2 rounded-full ${isLoading ? 'bg-yellow-500' : 'bg-green-500'} animate-pulse`}></span>
                 <span className={isLoading ? "text-yellow-600" : "text-green-600"}>
-                  {isLoading ? 'Connecting...' : 'Live System'}
+                  {isLoading ? 'Loading Data...' : 'Live System'}
                 </span>
              </div>
           </div>
@@ -178,19 +213,41 @@ const App = () => {
         {/* Top Controls */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-4 gap-4">
           
-          {/* Market Summary Chips */}
-          <div className="flex items-center space-x-4 text-sm overflow-x-auto no-scrollbar">
-            <div className="px-3 py-1.5 bg-white border border-gray-200 rounded-md shadow-sm flex-shrink-0">
-              <span className="text-gray-500 mr-2">Pairs</span>
-              <span className="font-semibold text-gray-700">{stats.total}</span>
+          {/* Left: View Switcher & Market Summary */}
+          <div className="flex items-center gap-4">
+            {/* View Switcher (Segmented Control) */}
+            <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
+              <button
+                onClick={() => setViewMode('market')}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
+                  viewMode === 'market' 
+                    ? 'bg-white text-gray-900 shadow-sm' 
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Market
+              </button>
+              <button
+                onClick={() => setViewMode('favorites')}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 flex items-center gap-1.5 ${
+                  viewMode === 'favorites' 
+                    ? 'bg-white text-yellow-600 shadow-sm' 
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+                  <path fillRule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clipRule="evenodd" />
+                </svg>
+                Favorites
+              </button>
             </div>
-            <div className="px-3 py-1.5 bg-white border border-gray-200 rounded-md shadow-sm flex-shrink-0">
-              <span className="text-gray-500 mr-2">24h Up</span>
-              <span className="font-semibold text-green-600">{stats.up}</span>
-            </div>
-            <div className="px-3 py-1.5 bg-white border border-gray-200 rounded-md shadow-sm flex-shrink-0">
-              <span className="text-gray-500 mr-2">24h Down</span>
-              <span className="font-semibold text-red-600">{stats.down}</span>
+
+            {/* Stats (Hidden on small mobile to save space) */}
+            <div className="hidden lg:flex items-center space-x-4 text-sm">
+              <div className="px-3 py-1.5 bg-white border border-gray-200 rounded-md shadow-sm flex-shrink-0">
+                <span className="text-gray-500 mr-2">Pairs</span>
+                <span className="font-semibold text-gray-700">{stats.total}</span>
+              </div>
             </div>
           </div>
 
@@ -223,21 +280,14 @@ const App = () => {
                 <div className="absolute top-full right-0 mt-2 w-[90vw] md:w-[480px] bg-white/95 backdrop-blur-xl border border-gray-200 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col max-h-[60vh] animate-in fade-in zoom-in-95 duration-100 origin-top-right">
                   
                   {/* Dropdown Header */}
-                  <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                  <div className="px-4 py-3 border-b border-gray-100 flex items-center bg-gray-50/50">
                     <span className="text-xs font-bold uppercase text-gray-500 tracking-wider">Filter Quote Assets</span>
-                    <button 
-                      onClick={() => toggleAsset('ALL')}
-                      className="text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors px-2 py-1 rounded hover:bg-blue-50"
-                    >
-                      Reset to All
-                    </button>
                   </div>
 
                   {/* Dropdown Grid */}
                   <div className="p-4 overflow-y-auto custom-scrollbar">
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                       {availableQuoteAssets.map((asset) => {
-                         if (asset === 'ALL') return null;
                          const isSelected = selectedAssets.includes(asset);
                          const count = assetCounts[asset] || 0;
 
@@ -253,9 +303,9 @@ const App = () => {
                                }
                              `}
                            >
-                             <span className="font-bold mb-0.5">{asset}</span>
+                             <span className="font-bold mb-0.5">{asset === 'ALL' ? 'ALL MARKETS' : asset}</span>
                              <span className={`text-[10px] ${isSelected ? 'text-gray-400' : 'text-gray-400'}`}>
-                               {count}
+                               {asset === 'ALL' ? stats.total : count}
                              </span>
                            </button>
                          );
@@ -290,14 +340,35 @@ const App = () => {
             <div className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-sm z-10 rounded-lg border border-gray-200">
                <div className="flex flex-col items-center">
                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700 mb-2"></div>
-                 <span className="text-sm text-gray-500">Connecting...</span>
+                 <span className="text-sm text-gray-500">Loading Data...</span>
                </div>
             </div>
           ) : (
-             <VirtualTable 
-               data={filteredData} 
-               height="100%" 
-             />
+             filteredData.length > 0 ? (
+               <VirtualTable 
+                 data={filteredData} 
+                 height="100%"
+                 favorites={favorites}
+                 onToggleFavorite={toggleFavorite}
+               />
+             ) : (
+               <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 bg-white border border-gray-200 rounded-lg">
+                 {viewMode === 'favorites' ? (
+                   <>
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 mb-2 text-gray-300">
+                       <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
+                     </svg>
+                     <p className="text-lg font-medium text-gray-500">No favorites yet</p>
+                     <p className="text-sm mt-1">Click the star icon on any market to add it here.</p>
+                   </>
+                 ) : (
+                   <>
+                     <p className="text-lg font-medium text-gray-500">No markets found</p>
+                     <p className="text-sm mt-1">Try adjusting your search or filters.</p>
+                   </>
+                 )}
+               </div>
+             )
           )}
         </div>
         
