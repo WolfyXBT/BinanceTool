@@ -22,10 +22,13 @@ export const getQuoteAsset = (symbol: string): string | null => {
 };
 
 // Combined Stream URL to get 24h, 1h, and 4h tickers simultaneously
+// Updated with Vision domain and Port 443 priority for better connectivity
+const STREAMS = '?streams=!ticker@arr/!ticker_1h@arr/!ticker_4h@arr';
 const BASE_WS_URLS = [
-  'wss://stream.binance.com:9443/stream?streams=!ticker@arr/!ticker_1h@arr/!ticker_4h@arr',
-  'wss://stream.binance.com/stream?streams=!ticker@arr/!ticker_1h@arr/!ticker_4h@arr',
-  'wss://data-stream.binance.com/stream?streams=!ticker@arr/!ticker_1h@arr/!ticker_4h@arr',
+  `wss://data-stream.binance.vision/stream${STREAMS}`,      // Vision (Often most accessible)
+  `wss://stream.binance.com:443/stream${STREAMS}`,         // Main (Port 443 - Firewall friendly)
+  `wss://stream.binance.com:9443/stream${STREAMS}`,        // Main (Port 9443 - Standard)
+  `wss://data-stream.binance.com/stream${STREAMS}`,         // GCP Mirror
 ];
 
 export class BinanceService {
@@ -205,7 +208,8 @@ export class BinanceService {
     };
 
     this.ws.onerror = (event) => {
-      console.error('Binance WebSocket Error', event);
+      // Don't log full event object as it typically contains no useful info in browser
+      console.log('Binance WebSocket Error occurred. Connection might be blocked.');
       if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
         this.ws.close();
       }
