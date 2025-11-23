@@ -11,6 +11,9 @@ const App = () => {
   // Default to USDT instead of ALL
   const [selectedAssets, setSelectedAssets] = useState<string[]>(['USDT']);
   
+  // Track current sorted order for lazy loading priority
+  const [sortedSymbols, setSortedSymbols] = useState<string[]>([]);
+  
   // Favorites State
   const [favorites, setFavorites] = useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
@@ -66,6 +69,37 @@ const App = () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // --- Progressive Hydration Loop ---
+  // This effect runs periodically to fill in missing 1h/4h data from top to bottom
+  useEffect(() => {
+    // If we have no data or no sort order, do nothing
+    if (tickerDataMap.size === 0 || sortedSymbols.length === 0) return;
+
+    const fillNextEmpty = async () => {
+      // Find the first symbol in the CURRENT visual order that has missing data
+      const targetSymbol = sortedSymbols.find(symbol => {
+        const item = tickerDataMap.get(symbol);
+        // We want to fill if 1h OR 4h is undefined
+        return item && (item.changePercent1h === undefined || item.changePercent4h === undefined);
+      });
+
+      if (targetSymbol) {
+        // Fetch detailed stats for this specific symbol
+        // The service handles rate limiting logic if we call this too fast, but we'll control it here too
+        await binanceService.fetchDetailedStats(targetSymbol);
+      }
+    };
+
+    // Run this check every 200ms (5 times per second)
+    // This creates a safe rate of ~300 requests per minute (Limit is 6000)
+    const intervalId = setInterval(fillNextEmpty, 200);
+
+    return () => clearInterval(intervalId);
+  }, [sortedSymbols, tickerDataMap]); 
+  // Dependency on tickerDataMap ensures we re-evaluate after an update
+  // Dependency on sortedSymbols ensures we restart from the top if sort changes
+  // ----------------------------------
 
   // Persist favorites to localStorage
   const toggleFavorite = (symbol: string) => {
@@ -129,9 +163,6 @@ const App = () => {
     }
 
     // 1. Filter by Quote Asset (Base Currency) - Only apply if NOT in favorites mode, or if user wants to filter favorites
-    // Usually favorites view shows everything, but let's allow filtering favorites too if desired.
-    // However, typical behavior is "Favorites" shows all favorites regardless of quote asset filter unless specified.
-    // Let's keep quote asset filter active even in favorites for power users, but "ALL" is usually preferred there.
     if (!selectedAssets.includes('ALL')) {
       data = data.filter(item => {
         return selectedAssets.some(asset => item.symbol.endsWith(asset));
@@ -357,6 +388,7 @@ const App = () => {
                  height="100%"
                  favorites={favorites}
                  onToggleFavorite={toggleFavorite}
+                 onSortedIdsChange={setSortedSymbols}
                />
              ) : (
                <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 bg-white border border-gray-200 rounded-lg">

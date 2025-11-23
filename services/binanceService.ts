@@ -39,105 +39,119 @@ export class BinanceService {
   private maxReconnectDelay = 10000;
   private reconnectTimeoutId: any = null;
   private endpointIndex = 0;
+  
+  // Set to track which symbols are currently being fetched to prevent duplicate requests
+  private pendingFetches: Set<string> = new Set();
 
   constructor() {}
 
   public connect() {
-    // 1. Fetch Snapshot
+    // 1. Fetch Snapshot (Client Side Direct)
     this.fetchInitialSnapshot();
     // 2. Start WebSocket (Real-time)
     this.connectWebSocket();
   }
 
   private async fetchInitialSnapshot() {
-    console.log("[Client] Starting Initial Snapshot fetch...");
-    try {
-      // Attempt 1: Try fetching from our own Vercel Serverless Function
-      const response = await fetch('/api/snapshot');
-      
-      console.log(`[Client] Server Snapshot Response: ${response.status} ${response.statusText}`);
-      
-      // Check for custom debug headers
-      const debugStatus = response.headers.get('X-Debug-Status');
-      const debugErrors = response.headers.get('X-Debug-Errors');
-      if (debugStatus) {
-        console.log(`[Client] Server Debug: Status=${debugStatus}, Errors=${debugErrors}`);
-      }
+    console.log("[Client] Starting Client-Side Snapshot fetch...");
+    
+    // List of public API domains to try sequentially
+    // Priority: Vision (Public Data) -> Main -> GCP Mirror
+    const apiDomains = [
+      'https://data-api.binance.vision', 
+      'https://api.binance.com',         
+      'https://api-gcp.binance.com'      
+    ];
 
-      if (!response.ok) {
-        const errorJson = await response.json();
-        console.error("[Client] Server returned error JSON:", errorJson);
-        throw new Error(`Server snapshot endpoint returned ${response.status}`);
-      }
-
-      const data: any[] = await response.json();
-      console.log(`[Client] Successfully loaded ${data.length} records from Server.`);
-
-      // Populate the map
-      data.forEach(record => {
-        this.tickerMap.set(record.symbol, {
-          ...record,
-          // Ensure we explicitly treat server snapshot percentages as potentially undefined
-          // Even if the server sends null, we map it to undefined for consistency
-          changePercent1h: undefined, // Force undefined, wait for WS
-          changePercent4h: undefined, // Force undefined, wait for WS
-          changePercent24h: record.changePercent24h, // Keep 24h as it comes from the reliable 24hr ticker
-        });
-      });
-
-      this.notify();
-    } catch (error) {
-      console.warn("[Client] Internal API snapshot failed. Reason:", error);
-      console.warn("[Client] Triggering Fallback to Direct Public API (24h only)...");
-      // Attempt 2: Fallback to Direct Client-Side Fetching
-      await this.fallbackClientSideSnapshot();
-    }
-  }
-
-  private async fallbackClientSideSnapshot() {
-    try {
-      // 1. Get Exchange Info to filter for TRADING status only
-      const infoResponse = await fetch('https://api.binance.com/api/v3/exchangeInfo?permissions=SPOT');
-      if (!infoResponse.ok) throw new Error('Binance Info failed');
-      const infoData = await infoResponse.json();
-      
-      const tradingSymbols = new Set<string>();
-      if (infoData.symbols && Array.isArray(infoData.symbols)) {
-        infoData.symbols.forEach((s: any) => {
-          if (s.status === 'TRADING') {
-            tradingSymbols.add(s.symbol);
-          }
-        });
-      }
-
-      // 2. Get 24h Ticker for all pairs
-      const tickerResponse = await fetch('https://api.binance.com/api/v3/ticker/24hr');
-      if (!tickerResponse.ok) throw new Error('Binance Ticker failed');
-      const tickerData = await tickerResponse.json();
-
-      // 3. Map and Filter
-      let count = 0;
-      tickerData.forEach((item: any) => {
-        if (!tradingSymbols.has(item.symbol)) return;
+    for (const domain of apiDomains) {
+      try {
+        console.log(`[Client] Trying snapshot from: ${domain}`);
+        const response = await fetch(`${domain}/api/v3/ticker/24hr`);
         
-        this.tickerMap.set(item.symbol, {
-          symbol: item.symbol,
-          price: parseFloat(item.lastPrice),
-          volume: parseFloat(item.quoteVolume),
-          changePercent24h: parseFloat(item.priceChangePercent),
-          changePercent1h: undefined,
-          changePercent4h: undefined,
+        if (!response.ok) {
+           throw new Error(`Status ${response.status} from ${domain}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!Array.isArray(data)) {
+            throw new Error('Invalid data format received');
+        }
+
+        let count = 0;
+        data.forEach((item: any) => {
+          // Basic filter: must have traded in last 24h to be valid
+          // This removes "zombie" pairs without needing a separate ExchangeInfo call
+          if (item.count === 0) return;
+
+          this.tickerMap.set(item.symbol, {
+            symbol: item.symbol,
+            price: parseFloat(item.lastPrice),
+            volume: parseFloat(item.quoteVolume),
+            changePercent24h: parseFloat(item.priceChangePercent),
+            changePercent1h: undefined, // Wait for Lazy Fill / WS
+            changePercent4h: undefined, // Wait for Lazy Fill / WS
+          });
+          count++;
         });
-        count++;
-      });
+
+        console.log(`[Client] Successfully loaded ${count} records from ${domain}`);
+        this.notify();
+        return; // Success, exit loop
+      } catch (e) {
+        console.warn(`[Client] Failed to fetch from ${domain}:`, e);
+        // Continue to next domain
+      }
+    }
+    
+    console.error("[Client] Critical: All client-side snapshot endpoints failed.");
+    // Even if it fails, we notify so the app might show an empty state or wait for WS
+    this.notify();
+  }
+
+  // --- Lazy Loading 1h/4h data ---
+  public async fetchDetailedStats(symbol: string) {
+    if (this.pendingFetches.has(symbol)) return; // Already fetching
+    this.pendingFetches.add(symbol);
+
+    try {
+      // Use binance.vision for best public API limits (Client Side)
+      const baseUrl = 'https://data-api.binance.vision/api/v3/ticker';
       
-      console.log(`[Client] Fallback loaded ${count} records (24h only).`);
-      this.notify();
+      // We need to fetch 1h and 4h separately because the API doesn't support multiple windows in one call for a symbol
+      const [res1h, res4h] = await Promise.all([
+        fetch(`${baseUrl}?symbol=${symbol}&windowSize=1h`).then(r => r.ok ? r.json() : null),
+        fetch(`${baseUrl}?symbol=${symbol}&windowSize=4h`).then(r => r.ok ? r.json() : null)
+      ]);
+
+      const item = this.tickerMap.get(symbol);
+      if (item) {
+        let updated = false;
+        
+        // Only update if we don't have WS data yet (WS data is usually more recent)
+        // Or if the current value is undefined
+        if (res1h && item.changePercent1h === undefined) {
+           item.changePercent1h = parseFloat(res1h.priceChangePercent);
+           updated = true;
+        }
+        
+        if (res4h && item.changePercent4h === undefined) {
+           item.changePercent4h = parseFloat(res4h.priceChangePercent);
+           updated = true;
+        }
+
+        if (updated) {
+          this.tickerMap.set(symbol, item);
+          this.notify();
+        }
+      }
     } catch (e) {
-      console.error("[Client] Critical: All snapshot methods failed.", e);
-      this.notify(); 
+      // Silently fail, we'll try again later or wait for WS
+    } finally {
+      this.pendingFetches.delete(symbol);
     }
   }
+  // ----------------------------------------------
 
   private connectWebSocket() {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {

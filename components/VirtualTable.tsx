@@ -8,6 +8,8 @@ interface VirtualTableProps {
   height: string;
   favorites: Set<string>;
   onToggleFavorite: (symbol: string) => void;
+  // Callback to inform parent about the current sorted order
+  onSortedIdsChange?: (sortedIds: string[]) => void;
 }
 
 const ROW_HEIGHT = 48;
@@ -53,7 +55,7 @@ const formatPercent = (pct: number | undefined) => {
 };
 // --------------------------
 
-export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favorites, onToggleFavorite }) => {
+export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favorites, onToggleFavorite, onSortedIdsChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [sortField, setSortField] = useState<SortField>('volume');
@@ -113,6 +115,13 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
     return sorted;
   }, [data, sortField, sortDirection]);
 
+  // Notify parent whenever the sorted list changes
+  useEffect(() => {
+    if (onSortedIdsChange) {
+      onSortedIdsChange(sortedData.map(d => d.symbol));
+    }
+  }, [sortedData, onSortedIdsChange]);
+
   const totalHeight = sortedData.length * ROW_HEIGHT;
   const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const visibleCount = Math.ceil((containerRef.current?.clientHeight || 600) / ROW_HEIGHT) + 2 * OVERSCAN;
@@ -142,7 +151,7 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
     if (pct > 10) return '#b1d9b9';        // 10% ~ 20%
     if (pct > 5) return '#c0e0c7';         // 5% ~ 10%
     if (pct > 0.01) return '#dfeee2';      // 0.01% ~ 5%
-    if (pct >= -0.01) return '#fdf3d1';    // -0.01% ~ 0.01% (Neutral)
+    if (pct >= -0.01) return '#fdf3d1';    // -0.01% ~ 0.01% (Neutral, Cream)
     if (pct > -5) return '#efbdc2';        // -5% ~ -0.01%
     if (pct > -10) return '#e8939a';       // -10% ~ -5%
     if (pct > -20) return '#e68085';       // -20% ~ -10%
@@ -275,9 +284,9 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
                     className="ml-2 p-[3px] rounded-md hover:bg-black transition-all duration-200 flex-shrink-0"
                     title="Trade on Binance"
                   >
-                    <svg viewBox="0 0 32 32" className="w-[15px] h-[15px]" xmlns="http://www.w3.org/2000/svg">
+                    <svg fill="#f3ba2f" viewBox="0 0 32 32" className="w-[15px] h-[15px]" xmlns="http://www.w3.org/2000/svg">
                       <title>binance</title>
-                      <path d="M15.986 1.019l9.189 9.159-3.396 3.393-5.793-5.793-5.793 5.823-3.396-3.393 9.189-9.189zM4.399 12.605l3.365 3.395-3.363 3.365-3.396-3.365zM15.986 12.607l3.394 3.363-3.395 3.395-3.395-3.365 3.395-3.393zM27.572 12.605l3.423 3.395-3.393 3.395-3.395-3.395zM21.778 18.399l3.396 3.393-9.189 9.189-9.189-9.187 3.396-3.395 5.793 5.823 5.793-5.823z" fill="#f3ba2f" />
+                      <path d="M15.986 1.019l9.189 9.159-3.396 3.393-5.793-5.793-5.793 5.823-3.396-3.393 9.189-9.189zM4.399 12.605l3.365 3.395-3.363 3.365-3.396-3.365zM15.986 12.607l3.394 3.363-3.395 3.395-3.395-3.365 3.395-3.393zM27.572 12.605l3.423 3.395-3.393 3.395-3.395-3.395zM21.778 18.399l3.396 3.393-9.189 9.189-9.189-9.187 3.396-3.395 5.793 5.823 5.793-5.823z"></path>
                     </svg>
                   </a>
 
