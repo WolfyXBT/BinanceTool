@@ -135,14 +135,14 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
 
   // Helper for full-cell background coloring based on specific thresholds
   const getCellBackgroundColor = (pct: number | undefined) => {
-    if (pct === undefined) return '#ffffff';
+    if (pct === undefined) return '#f3f4f6';
     
     if (pct > 30) return '#7bbc81';        // > 30%
     if (pct > 20) return '#a3d1aa';        // 20% ~ 30%
     if (pct > 10) return '#b1d9b9';        // 10% ~ 20%
     if (pct > 5) return '#c0e0c7';         // 5% ~ 10%
     if (pct > 0.01) return '#dfeee2';      // 0.01% ~ 5%
-    if (pct >= -0.01) return '#ffffff';    // -0.01% ~ 0.01% (Neutral)
+    if (pct >= -0.01) return '#fdf3d1';    // -0.01% ~ 0.01% (Neutral)
     if (pct > -5) return '#efbdc2';        // -5% ~ -0.01%
     if (pct > -10) return '#e8939a';       // -10% ~ -5%
     if (pct > -20) return '#e68085';       // -20% ~ -10%
@@ -259,15 +259,26 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
 
                 {/* Token */}
                 <div className="flex-1 px-4 flex items-center min-w-0 bg-white h-full">
+                  {/* Token Name (Text Only) */}
+                  <div 
+                    className="flex items-center truncate px-2 py-1 -ml-2 rounded-md select-all"
+                  >
+                    <span className="font-bold text-gray-700 truncate">{baseAsset}</span>
+                    <span className="text-xs text-gray-400 ml-0.5 font-normal">{displayQuote}</span>
+                  </div>
+
+                  {/* Binance Trade Button */}
                   <a 
                     href={tradeUrl}
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="flex items-center truncate px-2 py-1 -ml-2 rounded-md hover:bg-gray-200 transition-colors duration-200"
+                    className="ml-2 p-[3px] rounded-md hover:bg-black transition-all duration-200 flex-shrink-0"
                     title="Trade on Binance"
                   >
-                    <span className="font-bold text-gray-700 truncate">{baseAsset}</span>
-                    <span className="text-xs text-gray-400 ml-0.5 font-normal">{displayQuote}</span>
+                    <svg viewBox="0 0 32 32" className="w-[15px] h-[15px]" xmlns="http://www.w3.org/2000/svg">
+                      <title>binance</title>
+                      <path d="M15.986 1.019l9.189 9.159-3.396 3.393-5.793-5.793-5.793 5.823-3.396-3.393 9.189-9.189zM4.399 12.605l3.365 3.395-3.363 3.365-3.396-3.365zM15.986 12.607l3.394 3.363-3.395 3.395-3.395-3.365 3.395-3.393zM27.572 12.605l3.423 3.395-3.393 3.395-3.395-3.395zM21.778 18.399l3.396 3.393-9.189 9.189-9.189-9.187 3.396-3.395 5.793 5.823 5.793-5.823z" fill="#f3ba2f" />
+                    </svg>
                   </a>
 
                   {/* X Search Button */}
@@ -275,10 +286,10 @@ export const VirtualTable: React.FC<VirtualTableProps> = ({ data, height, favori
                     href={xUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="ml-2 p-1.5 rounded-md text-gray-400 hover:bg-black hover:text-white transition-all duration-200"
+                    className="ml-1 p-[3px] rounded-md text-gray-400 hover:bg-black hover:text-white transition-all duration-200 flex-shrink-0"
                     title={`Search $${baseAsset} on X`}
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" className="w-3 h-3 fill-current">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" className="w-[15px] h-[15px] fill-current">
                       <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path>
                     </svg>
                   </a>
